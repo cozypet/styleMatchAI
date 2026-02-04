@@ -1,3 +1,4 @@
+Implement that with Streamlit UI.
 # RetailNext Intelligent Search - Simple Implementation Plan
 
 ## Goal

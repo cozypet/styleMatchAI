@@ -1,0 +1,6 @@
+streamlit>=1.32.0
+openai>=1.40.0
+openai-agents
+pymongo[srv]>=4.6.0
+python-dotenv>=1.0.0
+certifi>=2024.2.2
