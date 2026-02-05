@@ -19,6 +19,7 @@ Deliver a conversational retail demo that:
 - ✅ Clean, conversational summaries + bullet reasons
 - ✅ Try‑on image generation via OpenAI Images API
 - ✅ Cart + stock check + payment + delivery planned message
+- ✅ Tech Demo tab with JSON blocks per step and brief explanations between blocks
 
 ## Key Behavior Rules
 - **Search query formation**: Only extract **color** + **category** for the vector query.
@@ -80,9 +81,20 @@ Deliver a conversational retail demo that:
    - User can upload a photo, use a URL, or profile photo.
    - Generate try‑on image via OpenAI Images API (`gpt-image-1.5`).
 
+9. **Tech Demo (Parallel View)**
+   - Second tab labeled **Tech Demo**.
+   - Shows a JSON block per step:
+     - Intent (`gpt-4o-mini`)
+     - MongoDB Atlas Vector Search
+     - Rerank (`gpt-4o`)
+     - Summary (`gpt-4o`)
+     - Try‑On (`gpt-image-1.5`, when used)
+   - Each JSON block is preceded by a short explanation and model/service label.
+
 ## UX / UI Requirements
 - Steps appear sequentially and **remain visible** (not overwritten).
 - No raw JSON should be rendered in chat.
+- Tech Demo tab shows **JSON blocks** for each technology step, with a short explanation and model/service label between blocks.
 - Recommendations are formatted as short paragraphs + bullets.
 - Images are shown at reduced size due to low resolution.
 
@@ -98,4 +110,4 @@ Deliver a conversational retail demo that:
 - Event context affects rerank, not vector search.
 - Conversational output is readable and not JSON.
 - Try‑on generates an image with clear error handling.
-
+- Tech Demo tab shows JSON blocks per step with explanations between blocks.
