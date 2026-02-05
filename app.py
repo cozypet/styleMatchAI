@@ -613,6 +613,8 @@ def generate_tryon_image(user_image_input: dict, product_image_url: str) -> tupl
         debug["error"] = "Product image URL missing."
         return None, debug
 
+    run_id = st.session_state.get("active_run_id") if "active_run_id" in st.session_state else None
+
     prompt = (
         "Edit the first image (the person) so they are wearing the clothing item from the second image. "
         "Preserve the person's face, identity, pose, body shape, and background. Do not change the face of the person. "
@@ -635,6 +637,15 @@ def generate_tryon_image(user_image_input: dict, product_image_url: str) -> tupl
 
     if not user_bytes:
         debug["error"] = "Could not load user image."
+        if run_id:
+            update_debug_step(
+                run_id,
+                "Image Generation (Try-On)",
+                "error",
+                "User image load failed",
+                model="gpt-image-1.5",
+                outputs={"error": debug["error"]}
+            )
         return None, debug
 
     # Load product image bytes
@@ -649,9 +660,32 @@ def generate_tryon_image(user_image_input: dict, product_image_url: str) -> tupl
 
     if not product_bytes:
         debug["error"] = "Could not load product image."
+        if run_id:
+            update_debug_step(
+                run_id,
+                "Image Generation (Try-On)",
+                "error",
+                "Product image load failed",
+                model="gpt-image-1.5",
+                outputs={"error": debug["error"]}
+            )
         return None, debug
 
     try:
+        if run_id:
+            update_debug_step(
+                run_id,
+                "Image Generation (Try-On)",
+                "running",
+                "Generating try-on image",
+                model="gpt-image-1.5",
+                inputs={
+                    "user_image_source": debug["user_image"].get("source"),
+                    "user_image_bytes": debug["user_image"].get("bytes"),
+                    "product_image_source": debug["product_image"].get("source"),
+                    "product_image_bytes": debug["product_image"].get("bytes")
+                }
+            )
         user_mime = user_mime or "image/jpeg"
         product_mime = product_mime or "image/jpeg"
         user_name = f"user.{user_mime.split('/')[-1]}"
@@ -666,10 +700,37 @@ def generate_tryon_image(user_image_input: dict, product_image_url: str) -> tupl
         image_base64 = result.data[0].b64_json if result.data else None
         if not image_base64:
             debug["error"] = "No image returned by Images API."
+            if run_id:
+                update_debug_step(
+                    run_id,
+                    "Image Generation (Try-On)",
+                    "error",
+                    "No image returned by API",
+                    model="gpt-image-1.5",
+                    outputs={"error": debug["error"]}
+                )
             return None, debug
+        if run_id:
+            update_debug_step(
+                run_id,
+                "Image Generation (Try-On)",
+                "done",
+                "Try-on image generated",
+                model="gpt-image-1.5",
+                outputs={"image_b64_len": len(image_base64)}
+            )
         return image_base64, debug
     except Exception as exc:
         debug["error"] = f"OpenAI error: {exc}"
+        if run_id:
+            update_debug_step(
+                run_id,
+                "Image Generation (Try-On)",
+                "error",
+                "Image generation failed",
+                model="gpt-image-1.5",
+                outputs={"error": debug["error"]}
+            )
         return None, debug
 
 # =============================================================================
@@ -1020,6 +1081,169 @@ def normalize_message_content(msg: dict) -> bool:
     return True
 
 # =============================================================================
+# DEBUG PANEL (PARALLEL LOG VIEW)
+# =============================================================================
+
+def ensure_debug_state():
+    if "tech_runs" not in st.session_state:
+        st.session_state.tech_runs = []
+    if "active_run_id" not in st.session_state:
+        st.session_state.active_run_id = None
+
+TECH_STEP_EXPLANATIONS = {
+    "GPT-4o Mini Intent": "Extracts category, color, event, and gender intent from the user message.",
+    "MongoDB Atlas Vector Search": "Finds the top 5 most similar products using vector search.",
+    "GPT-4o Reranking": "Reorders results using event context and image understanding.",
+    "GPT-4o Summary": "Writes a friendly summary and recommendations.",
+    "Image Generation (Try-On)": "Generates a virtual try-on image from user + product photos."
+}
+
+
+def _find_debug_run(run_id: str | None) -> dict | None:
+    if not run_id:
+        return None
+    for run in st.session_state.tech_runs:
+        if run.get("run_id") == run_id:
+            return run
+    return None
+
+
+def start_debug_run(user_query: str, search_query: str, event: dict | None, gender_filter: list | None) -> str:
+    run_id = f"run_{uuid4().hex[:8]}"
+    run = {
+        "run_id": run_id,
+        "timestamp": datetime.now().isoformat(),
+        "user_query": user_query,
+        "search_query": search_query,
+        "event_context": event or {},
+        "gender_filter": gender_filter or [],
+        "steps": []
+    }
+    st.session_state.tech_runs.insert(0, run)
+    st.session_state.tech_runs = st.session_state.tech_runs[:5]
+    st.session_state.active_run_id = run_id
+    return run_id
+
+
+def update_debug_step(
+    run_id: str,
+    step_name: str,
+    status: str,
+    details: str = "",
+    inputs: dict | None = None,
+    outputs: dict | None = None,
+    model: str | None = None,
+    service: str | None = None,
+    explanation: str | None = None
+):
+    run = _find_debug_run(run_id)
+    if not run:
+        return
+    step = {
+        "step": step_name,
+        "status": status
+    }
+    if details:
+        step["details"] = details
+    if model:
+        step["model"] = model
+    if service:
+        step["service"] = service
+    if explanation or step_name in TECH_STEP_EXPLANATIONS:
+        step["explanation"] = explanation or TECH_STEP_EXPLANATIONS.get(step_name, "")
+    if inputs is not None:
+        step["inputs"] = inputs
+    if outputs is not None:
+        step["outputs"] = outputs
+    # Replace existing step if present, else append
+    steps = run.get("steps", [])
+    for idx, existing in enumerate(steps):
+        if existing.get("step") == step_name:
+            steps[idx] = step
+            break
+    else:
+        steps.append(step)
+    run["steps"] = steps
+
+
+def render_debug_panel(current_ph, history_ph):
+    ensure_debug_state()
+    runs = st.session_state.tech_runs
+    active_id = st.session_state.active_run_id
+
+    if not runs:
+        with current_ph.container():
+            st.info("No queries yet. Tech demo logs will appear here.")
+        history_ph.empty()
+        return
+
+    active_run = _find_debug_run(active_id) or runs[0]
+
+    with current_ph.container():
+        st.markdown("### Current Run")
+        run_meta = {
+            "run_id": active_run.get("run_id"),
+            "timestamp": active_run.get("timestamp"),
+            "user_query": active_run.get("user_query"),
+            "vector_query": active_run.get("search_query"),
+            "event_context": active_run.get("event_context") or {},
+            "gender_filter": active_run.get("gender_filter") or []
+        }
+        st.code(json.dumps(run_meta, indent=2), language="json")
+        st.markdown("**Tech Steps (JSON)**")
+        for step in active_run.get("steps", []):
+            step_view = dict(step)
+            if "explanation" not in step_view and step_view.get("step") in TECH_STEP_EXPLANATIONS:
+                step_view["explanation"] = TECH_STEP_EXPLANATIONS.get(step_view["step"], "")
+            expl = step_view.get("explanation", "").strip()
+            model = step_view.get("model")
+            service = step_view.get("service")
+            tech = model or service or "N/A"
+            details = step_view.get("details", "").strip()
+            summary_parts = []
+            if expl:
+                summary_parts.append(expl)
+            if details:
+                summary_parts.append(details)
+            summary_text = " ".join(summary_parts) if summary_parts else "Technical step summary."
+            st.markdown(f"**{step_view.get('step', 'Step')}** — {summary_text}")
+            st.caption(f"Model/Service: {tech}")
+            st.code(json.dumps(step_view, indent=2), language="json")
+
+    with history_ph.container():
+        st.markdown("### Recent Runs")
+        for run in runs:
+            label = f"{run.get('timestamp', '')} — {run.get('user_query', '')[:60]}"
+            with st.expander(label, expanded=False):
+                run_meta = {
+                    "run_id": run.get("run_id"),
+                    "timestamp": run.get("timestamp"),
+                    "user_query": run.get("user_query"),
+                    "vector_query": run.get("search_query"),
+                    "event_context": run.get("event_context") or {},
+                    "gender_filter": run.get("gender_filter") or []
+                }
+                st.code(json.dumps(run_meta, indent=2), language="json")
+                for step in run.get("steps", []):
+                    step_view = dict(step)
+                    if "explanation" not in step_view and step_view.get("step") in TECH_STEP_EXPLANATIONS:
+                        step_view["explanation"] = TECH_STEP_EXPLANATIONS.get(step_view["step"], "")
+                    expl = step_view.get("explanation", "").strip()
+                    model = step_view.get("model")
+                    service = step_view.get("service")
+                    tech = model or service or "N/A"
+                    details = step_view.get("details", "").strip()
+                    summary_parts = []
+                    if expl:
+                        summary_parts.append(expl)
+                    if details:
+                        summary_parts.append(details)
+                    summary_text = " ".join(summary_parts) if summary_parts else "Technical step summary."
+                    st.markdown(f"**{step_view.get('step', 'Step')}** — {summary_text}")
+                    st.caption(f"Model/Service: {tech}")
+                    st.code(json.dumps(step_view, indent=2), language="json")
+
+# =============================================================================
 # MAIN
 # =============================================================================
 
@@ -1086,6 +1310,7 @@ def main():
         st.session_state.last_initial_results = []
     if "last_reranked_results" not in st.session_state:
         st.session_state.last_reranked_results = []
+    ensure_debug_state()
 
     # Sidebar: user selection + profile context + recent conversations
     with st.sidebar:
@@ -1200,137 +1425,87 @@ def main():
                         st.caption(snippet)
                     st.divider()
 
-    # Render history (chat bubbles + previous results)
-    for msg in st.session_state.messages:
-        normalize_message_content(msg)
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            render_message_content(msg.get("content", ""), msg)
-            if msg.get("initial_products"):
-                with st.expander("Initial 5 results (vector search)", expanded=False):
-                    render_product_cards(msg["initial_products"], show_vector_score=True, max_items=5)
-            if msg.get("reranked_products"):
-                st.markdown("**Top 3 reranked results**")
-                render_reranked_cards(msg["reranked_products"])
+    chat_tab, debug_tab = st.tabs(["Chat", "Tech Demo"])
 
-    # Persistent try-on panel (after history)
-    render_tryon_panel()
+    with debug_tab:
+        st.markdown("## 🧪 Tech Demo")
+        debug_current_ph = st.empty()
+        debug_history_ph = st.empty()
 
-    # Initial greeting
-    if not st.session_state.messages:
-        greeting = "Hello! What are you looking for today?"
-        st.session_state.messages.append({"role": "assistant", "content": greeting})
-        with st.chat_message("assistant"):
-            st.markdown(greeting)
+    render_debug_panel(debug_current_ph, debug_history_ph)
 
-    if not st.session_state.user_profile:
-        st.info("Select a user from the sidebar to start searching.")
-        return
+    with chat_tab:
+        # Render history (chat bubbles + previous results)
+        for msg in st.session_state.messages:
+            normalize_message_content(msg)
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                render_message_content(msg.get("content", ""), msg)
+                if msg.get("initial_products"):
+                    with st.expander("Initial 5 results (vector search)", expanded=False):
+                        render_product_cards(msg["initial_products"], show_vector_score=True, max_items=5)
+                if msg.get("reranked_products"):
+                    st.markdown("**Top 3 reranked results**")
+                    render_reranked_cards(msg["reranked_products"])
 
-    # Chat input and main flow
-    if user_input := st.chat_input("Search for products (e.g., red dress)"):
-        # Append user message
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        st.session_state.conversation_history.append({
-            "role": "user",
-            "content": user_input,
-            "timestamp": datetime.now().isoformat()
-        })
+        # Persistent try-on panel (after history)
+        render_tryon_panel()
+        render_debug_panel(debug_current_ph, debug_history_ph)
 
-        with st.chat_message("user"):
-            st.markdown(user_input)
+        # Initial greeting
+        if not st.session_state.messages:
+            greeting = "Hello! What are you looking for today?"
+            st.session_state.messages.append({"role": "assistant", "content": greeting})
+            with st.chat_message("assistant"):
+                st.markdown(greeting)
 
-        pending = st.session_state.pending
-        last_context = st.session_state.get("last_conversation_context", "")
+        if not st.session_state.user_profile:
+            st.info("Select a user from the sidebar to start searching.")
+            return
 
-        # Quick actions: stock check / add to cart / checkout
-        if not pending["await_event_confirm"]:
-            if wants_check_stock(user_input):
-                products = st.session_state.last_reranked_results or st.session_state.last_initial_results
-                with st.chat_message("assistant"):
-                    if not products:
-                        msg = "No recent results to check. Please search for products first."
-                        st.markdown(msg)
-                    else:
-                        st.markdown("**Stock availability:**")
-                        for i, p in enumerate(products[:3], 1):
-                            stock = p.get("stock_quantity")
-                            stock_text = f"{stock} available" if stock is not None else "Stock info unavailable"
-                            name = p.get('name', 'Item')
-                            st.caption(f"{i}. **{name}**: {stock_text}")
+        # Chat input and main flow
+        if user_input := st.chat_input("Search for products (e.g., red dress)"):
+            # Append user message
+            st.session_state.messages.append({"role": "user", "content": user_input})
+            st.session_state.conversation_history.append({
+                "role": "user",
+                "content": user_input,
+                "timestamp": datetime.now().isoformat()
+            })
 
-                        msg = "Stock checked. Which item would you like to add to your cart? Just tell me the name or number."
-                        st.markdown(msg)
-                        st.session_state.await_add_to_cart = True
+            with st.chat_message("user"):
+                st.markdown(user_input)
 
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": msg if products else "No recent results to check."
-                })
-                st.session_state.conversation_history.append({
-                    "role": "assistant",
-                    "content": msg if products else "No recent results to check.",
-                    "timestamp": datetime.now().isoformat()
-                })
-                save_conversation(
-                    st.session_state.current_user_id,
-                    st.session_state.session_id,
-                    st.session_state.conversation_history
-                )
-                return
-
-            if st.session_state.await_add_to_cart:
-                products = st.session_state.last_reranked_results or st.session_state.last_initial_results
-                if not products:
-                    msg = "I don't have any recent results. Please search for products first."
+            pending = st.session_state.pending
+            last_context = st.session_state.get("last_conversation_context", "")
+    
+            # Quick actions: stock check / add to cart / checkout
+            if not pending["await_event_confirm"]:
+                if wants_check_stock(user_input):
+                    products = st.session_state.last_reranked_results or st.session_state.last_initial_results
                     with st.chat_message("assistant"):
-                        st.markdown(msg)
-                    st.session_state.await_add_to_cart = False
-                    st.session_state.messages.append({"role": "assistant", "content": msg})
-                    return
-
-                # Try to find product by name/brand in user input
-                selected_item = None
-                user_lower = user_input.lower()
-
-                # Check if user specified a number (1, 2, 3)
-                for i in range(1, min(len(products) + 1, 10)):
-                    if str(i) in user_input or f"#{i}" in user_input:
-                        selected_item = products[i - 1]
-                        break
-
-                # If no number, try to match product name/brand
-                if not selected_item:
-                    for p in products[:3]:
-                        name_lower = p.get("name", "").lower()
-                        # Check if any significant word from product name is in user input
-                        name_words = [w for w in name_lower.split() if len(w) > 3]
-                        if any(word in user_lower for word in name_words):
-                            selected_item = p
-                            break
-
-                # If still not found, default to first item if user said "add" or "yes"
-                if not selected_item and wants_add_to_cart(user_input):
-                    selected_item = products[0]
-
-                if selected_item:
-                    st.session_state.cart.append({
-                        "id": selected_item.get("id"),
-                        "name": selected_item.get("name"),
-                        "price": selected_item.get("price"),
-                        "quantity": 1
+                        if not products:
+                            msg = "No recent results to check. Please search for products first."
+                            st.markdown(msg)
+                        else:
+                            st.markdown("**Stock availability:**")
+                            for i, p in enumerate(products[:3], 1):
+                                stock = p.get("stock_quantity")
+                                stock_text = f"{stock} available" if stock is not None else "Stock info unavailable"
+                                name = p.get('name', 'Item')
+                                st.caption(f"{i}. **{name}**: {stock_text}")
+    
+                            msg = "Stock checked. Which item would you like to add to your cart? Just tell me the name or number."
+                            st.markdown(msg)
+                            st.session_state.await_add_to_cart = True
+    
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": msg if products else "No recent results to check."
                     })
-                    msg = f"✅ Added **{selected_item.get('name', 'item')}** to your cart (${selected_item.get('price', 0):.2f}). Would you like to proceed to payment?"
-                    st.session_state.await_payment = True
-                    st.session_state.await_add_to_cart = False
-
-                    with st.chat_message("assistant"):
-                        st.markdown(msg)
-
-                    st.session_state.messages.append({"role": "assistant", "content": msg})
                     st.session_state.conversation_history.append({
                         "role": "assistant",
-                        "content": msg,
+                        "content": msg if products else "No recent results to check.",
                         "timestamp": datetime.now().isoformat()
                     })
                     save_conversation(
@@ -1338,36 +1513,150 @@ def main():
                         st.session_state.session_id,
                         st.session_state.conversation_history
                     )
-                else:
-                    msg = "I couldn't find that item in the recent results. Could you tell me which one by name or number (1, 2, 3)?"
-                    with st.chat_message("assistant"):
-                        st.markdown(msg)
-                    st.session_state.messages.append({"role": "assistant", "content": msg})
-
-                return
-
-            if st.session_state.await_payment:
-                answer = user_input.strip().lower()
-                is_yes = answer in ["yes", "y", "sure", "ok", "okay", "proceed", "pay", "checkout"]
-                is_no = answer in ["no", "n", "nope", "not yet", "cancel"]
-
-                if is_yes:
+                    return
+    
+                if st.session_state.await_add_to_cart:
+                    products = st.session_state.last_reranked_results or st.session_state.last_initial_results
+                    if not products:
+                        msg = "I don't have any recent results. Please search for products first."
+                        with st.chat_message("assistant"):
+                            st.markdown(msg)
+                        st.session_state.await_add_to_cart = False
+                        st.session_state.messages.append({"role": "assistant", "content": msg})
+                        return
+    
+                    # Try to find product by name/brand in user input
+                    selected_item = None
+                    user_lower = user_input.lower()
+    
+                    # Check if user specified a number (1, 2, 3)
+                    for i in range(1, min(len(products) + 1, 10)):
+                        if str(i) in user_input or f"#{i}" in user_input:
+                            selected_item = products[i - 1]
+                            break
+    
+                    # If no number, try to match product name/brand
+                    if not selected_item:
+                        for p in products[:3]:
+                            name_lower = p.get("name", "").lower()
+                            # Check if any significant word from product name is in user input
+                            name_words = [w for w in name_lower.split() if len(w) > 3]
+                            if any(word in user_lower for word in name_words):
+                                selected_item = p
+                                break
+    
+                    # If still not found, default to first item if user said "add" or "yes"
+                    if not selected_item and wants_add_to_cart(user_input):
+                        selected_item = products[0]
+    
+                    if selected_item:
+                        st.session_state.cart.append({
+                            "id": selected_item.get("id"),
+                            "name": selected_item.get("name"),
+                            "price": selected_item.get("price"),
+                            "quantity": 1
+                        })
+                        msg = f"✅ Added **{selected_item.get('name', 'item')}** to your cart (${selected_item.get('price', 0):.2f}). Would you like to proceed to payment?"
+                        st.session_state.await_payment = True
+                        st.session_state.await_add_to_cart = False
+    
+                        with st.chat_message("assistant"):
+                            st.markdown(msg)
+    
+                        st.session_state.messages.append({"role": "assistant", "content": msg})
+                        st.session_state.conversation_history.append({
+                            "role": "assistant",
+                            "content": msg,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                        save_conversation(
+                            st.session_state.current_user_id,
+                            st.session_state.session_id,
+                            st.session_state.conversation_history
+                        )
+                    else:
+                        msg = "I couldn't find that item in the recent results. Could you tell me which one by name or number (1, 2, 3)?"
+                        with st.chat_message("assistant"):
+                            st.markdown(msg)
+                        st.session_state.messages.append({"role": "assistant", "content": msg})
+    
+                    return
+    
+                if st.session_state.await_payment:
+                    answer = user_input.strip().lower()
+                    is_yes = answer in ["yes", "y", "sure", "ok", "okay", "proceed", "pay", "checkout"]
+                    is_no = answer in ["no", "n", "nope", "not yet", "cancel"]
+    
+                    if is_yes:
+                        cart = st.session_state.get("cart", [])
+                        total = sum(item["price"] * item.get("quantity", 1) for item in cart)
+    
+                        with st.chat_message("assistant"):
+                            st.markdown(f"**Order Summary:**")
+                            for item in cart:
+                                st.caption(f"• {item['name']}: ${item['price']:.2f}")
+                            st.markdown(f"**Total: ${total:.2f}**")
+                            st.markdown("---")
+                            st.markdown("✅ **Payment successful!** Your order is confirmed. Thank you for shopping!")
+                            st.caption("🚚 Delivery is planned. You’ll receive a confirmation email shortly.")
+    
+                        msg = f"Payment successful. Order total: ${total:.2f}. Delivery is planned."
+                        st.session_state.await_payment = False
+                        st.session_state.cart = []  # Clear cart after payment
+    
+                        st.session_state.messages.append({"role": "assistant", "content": msg})
+                        st.session_state.conversation_history.append({
+                            "role": "assistant",
+                            "content": msg,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                        save_conversation(
+                            st.session_state.current_user_id,
+                            st.session_state.session_id,
+                            st.session_state.conversation_history
+                        )
+                        return
+                    elif is_no:
+                        msg = "No problem! Your items are still in the cart. Let me know when you're ready to checkout or if you'd like to search for more items."
+                        st.session_state.await_payment = False
+    
+                        with st.chat_message("assistant"):
+                            st.markdown(msg)
+    
+                        st.session_state.messages.append({"role": "assistant", "content": msg})
+                        st.session_state.conversation_history.append({
+                            "role": "assistant",
+                            "content": msg,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                        save_conversation(
+                            st.session_state.current_user_id,
+                            st.session_state.session_id,
+                            st.session_state.conversation_history
+                        )
+                        return
+    
+                if wants_checkout(user_input):
                     cart = st.session_state.get("cart", [])
+                    if not cart:
+                        msg = "Your cart is empty. Please add some items first!"
+                        with st.chat_message("assistant"):
+                            st.markdown(msg)
+                        st.session_state.messages.append({"role": "assistant", "content": msg})
+                        return
+    
                     total = sum(item["price"] * item.get("quantity", 1) for item in cart)
-
                     with st.chat_message("assistant"):
                         st.markdown(f"**Order Summary:**")
                         for item in cart:
                             st.caption(f"• {item['name']}: ${item['price']:.2f}")
                         st.markdown(f"**Total: ${total:.2f}**")
                         st.markdown("---")
-                        st.markdown("✅ **Payment successful!** Your order is confirmed. Thank you for shopping!")
-                        st.caption("🚚 Delivery is planned. You’ll receive a confirmation email shortly.")
-
-                    msg = f"Payment successful. Order total: ${total:.2f}. Delivery is planned."
-                    st.session_state.await_payment = False
-                    st.session_state.cart = []  # Clear cart after payment
-
+                        st.markdown("Would you like to proceed with payment?")
+    
+                    st.session_state.await_payment = True
+                    msg = f"Checkout initiated. Total: ${total:.2f}. Proceed with payment?"
+    
                     st.session_state.messages.append({"role": "assistant", "content": msg})
                     st.session_state.conversation_history.append({
                         "role": "assistant",
@@ -1380,17 +1669,34 @@ def main():
                         st.session_state.conversation_history
                     )
                     return
-                elif is_no:
-                    msg = "No problem! Your items are still in the cart. Let me know when you're ready to checkout or if you'd like to search for more items."
-                    st.session_state.await_payment = False
-
+            # If we are waiting on missing fields
+            if pending["active"]:
+                intent = infer_intent_llm(user_input, last_context)
+                inferred_category = intent.get("category", "") if isinstance(intent, dict) else ""
+                inferred_color = intent.get("color", "") if isinstance(intent, dict) else ""
+                if pending["needs_category"]:
+                    pending["category"] = inferred_category or extract_category(user_input) or pending["category"]
+                    pending["needs_category"] = not bool(pending["category"])
+                if pending["needs_color"]:
+                    pending["color"] = inferred_color or extract_color(user_input) or pending["color"]
+                    pending["needs_color"] = not bool(pending["color"])
+    
+                if pending["needs_category"] or pending["needs_color"]:
+                    question = ""
+                    if pending["needs_category"] and pending["needs_color"]:
+                        question = "For the wedding, what category (dress, t-shirt, shoes, etc.) and what color are you looking for?"
+                    elif pending["needs_category"]:
+                        question = "What category are you shopping for (dress, t-shirt, shoes, etc.)?"
+                    else:
+                        question = "What color are you looking for?"
+    
                     with st.chat_message("assistant"):
-                        st.markdown(msg)
-
-                    st.session_state.messages.append({"role": "assistant", "content": msg})
+                        st.markdown(question)
+    
+                    st.session_state.messages.append({"role": "assistant", "content": question})
                     st.session_state.conversation_history.append({
                         "role": "assistant",
-                        "content": msg,
+                        "content": question,
                         "timestamp": datetime.now().isoformat()
                     })
                     save_conversation(
@@ -1399,53 +1705,85 @@ def main():
                         st.session_state.conversation_history
                     )
                     return
-
-            if wants_checkout(user_input):
-                cart = st.session_state.get("cart", [])
-                if not cart:
-                    msg = "Your cart is empty. Please add some items first!"
-                    with st.chat_message("assistant"):
-                        st.markdown(msg)
-                    st.session_state.messages.append({"role": "assistant", "content": msg})
-                    return
-
-                total = sum(item["price"] * item.get("quantity", 1) for item in cart)
-                with st.chat_message("assistant"):
-                    st.markdown(f"**Order Summary:**")
-                    for item in cart:
-                        st.caption(f"• {item['name']}: ${item['price']:.2f}")
-                    st.markdown(f"**Total: ${total:.2f}**")
-                    st.markdown("---")
-                    st.markdown("Would you like to proceed with payment?")
-
-                st.session_state.await_payment = True
-                msg = f"Checkout initiated. Total: ${total:.2f}. Proceed with payment?"
-
-                st.session_state.messages.append({"role": "assistant", "content": msg})
-                st.session_state.conversation_history.append({
-                    "role": "assistant",
-                    "content": msg,
-                    "timestamp": datetime.now().isoformat()
-                })
-                save_conversation(
-                    st.session_state.current_user_id,
-                    st.session_state.session_id,
-                    st.session_state.conversation_history
-                )
-                return
-        # If we are waiting on missing fields
-        if pending["active"]:
+    
+                # We have required fields now
+                pending["active"] = False
+    
+            # If awaiting event confirmation, handle yes/no (no repeated nagging)
+            if pending["await_event_confirm"]:
+                answer = user_input.strip().lower()
+                is_yes = answer in ["yes", "y", "sure", "ok", "okay"]
+                is_no = answer in ["no", "n", "nope", "not now"]
+    
+                if is_yes or is_no:
+                    if is_yes:
+                        profile = st.session_state.user_profile or {}
+                        events = profile.get("upcoming_events", [])
+                        if events:
+                            st.session_state.event_context = events[0]
+                            st.session_state.event_context_source = "profile"
+                    else:
+                        st.session_state.event_context = None
+                        st.session_state.event_context_source = "declined"
+    
+                    # Resume saved query
+                    user_input = pending["saved_query"]
+                    category = pending["saved_category"]
+                    color = pending["saved_color"]
+                    gender_override = pending["saved_gender_override"] or None
+    
+                    pending["await_event_confirm"] = False
+                    pending["saved_query"] = ""
+                    pending["saved_category"] = ""
+                    pending["saved_color"] = ""
+                    pending["saved_gender_override"] = ""
+                else:
+                    # If unclear, proceed without using the upcoming event (no repeat prompt)
+                    st.session_state.event_context = None
+                    st.session_state.event_context_source = "declined"
+                    pending["await_event_confirm"] = False
+                    pending["saved_query"] = ""
+                    pending["saved_category"] = ""
+                    pending["saved_color"] = ""
+                    pending["saved_gender_override"] = ""
+    
+            # New intent detection
             intent = infer_intent_llm(user_input, last_context)
-            inferred_category = intent.get("category", "") if isinstance(intent, dict) else ""
-            inferred_color = intent.get("color", "") if isinstance(intent, dict) else ""
-            if pending["needs_category"]:
-                pending["category"] = inferred_category or extract_category(user_input) or pending["category"]
-                pending["needs_category"] = not bool(pending["category"])
-            if pending["needs_color"]:
-                pending["color"] = inferred_color or extract_color(user_input) or pending["color"]
-                pending["needs_color"] = not bool(pending["color"])
-
-            if pending["needs_category"] or pending["needs_color"]:
+            category = intent.get("category", "") if isinstance(intent, dict) else ""
+            color = intent.get("color", "") if isinstance(intent, dict) else ""
+            gender_override = intent.get("gender_override", "") if isinstance(intent, dict) else ""
+            event_type = intent.get("event_type", "") if isinstance(intent, dict) else ""
+    
+            # Fallback to lightweight rules if model returns nothing
+            if not category:
+                category = extract_category(user_input)
+            if not color:
+                color = extract_color(user_input)
+            if not gender_override:
+                gender_override = detect_gender_override(user_input) or ""
+            if not event_type:
+                event_type = extract_event_type(user_input)
+    
+            wedding_intent = event_type == "wedding" or detect_wedding_intent(user_input)
+    
+            # Store explicit event context from user input
+            if event_type:
+                st.session_state.event_context = {
+                    "event_type": event_type,
+                    "date": "",
+                    "dress_code": "",
+                    "venue": "",
+                    "notes": "User-stated event"
+                }
+                st.session_state.event_context_source = "user"
+    
+            if wedding_intent and (not category or not color):
+                pending["active"] = True
+                pending["category"] = category
+                pending["color"] = color
+                pending["needs_category"] = not bool(category)
+                pending["needs_color"] = not bool(color)
+    
                 question = ""
                 if pending["needs_category"] and pending["needs_color"]:
                     question = "For the wedding, what category (dress, t-shirt, shoes, etc.) and what color are you looking for?"
@@ -1453,10 +1791,10 @@ def main():
                     question = "What category are you shopping for (dress, t-shirt, shoes, etc.)?"
                 else:
                     question = "What color are you looking for?"
-
+    
                 with st.chat_message("assistant"):
                     st.markdown(question)
-
+    
                 st.session_state.messages.append({"role": "assistant", "content": question})
                 st.session_state.conversation_history.append({
                     "role": "assistant",
@@ -1469,159 +1807,19 @@ def main():
                     st.session_state.conversation_history
                 )
                 return
-
-            # We have required fields now
-            pending["active"] = False
-
-        # If awaiting event confirmation, handle yes/no (no repeated nagging)
-        if pending["await_event_confirm"]:
-            answer = user_input.strip().lower()
-            is_yes = answer in ["yes", "y", "sure", "ok", "okay"]
-            is_no = answer in ["no", "n", "nope", "not now"]
-
-            if is_yes or is_no:
-                if is_yes:
-                    profile = st.session_state.user_profile or {}
-                    events = profile.get("upcoming_events", [])
-                    if events:
-                        st.session_state.event_context = events[0]
-                        st.session_state.event_context_source = "profile"
-                else:
-                    st.session_state.event_context = None
-                    st.session_state.event_context_source = "declined"
-
-                # Resume saved query
-                user_input = pending["saved_query"]
-                category = pending["saved_category"]
-                color = pending["saved_color"]
-                gender_override = pending["saved_gender_override"] or None
-
-                pending["await_event_confirm"] = False
-                pending["saved_query"] = ""
-                pending["saved_category"] = ""
-                pending["saved_color"] = ""
-                pending["saved_gender_override"] = ""
-            else:
-                # If unclear, proceed without using the upcoming event (no repeat prompt)
-                st.session_state.event_context = None
-                st.session_state.event_context_source = "declined"
-                pending["await_event_confirm"] = False
-                pending["saved_query"] = ""
-                pending["saved_category"] = ""
-                pending["saved_color"] = ""
-                pending["saved_gender_override"] = ""
-
-        # New intent detection
-        intent = infer_intent_llm(user_input, last_context)
-        category = intent.get("category", "") if isinstance(intent, dict) else ""
-        color = intent.get("color", "") if isinstance(intent, dict) else ""
-        gender_override = intent.get("gender_override", "") if isinstance(intent, dict) else ""
-        event_type = intent.get("event_type", "") if isinstance(intent, dict) else ""
-
-        # Fallback to lightweight rules if model returns nothing
-        if not category:
-            category = extract_category(user_input)
-        if not color:
-            color = extract_color(user_input)
-        if not gender_override:
-            gender_override = detect_gender_override(user_input) or ""
-        if not event_type:
-            event_type = extract_event_type(user_input)
-
-        wedding_intent = event_type == "wedding" or detect_wedding_intent(user_input)
-
-        # Store explicit event context from user input
-        if event_type:
-            st.session_state.event_context = {
-                "event_type": event_type,
-                "date": "",
-                "dress_code": "",
-                "venue": "",
-                "notes": "User-stated event"
-            }
-            st.session_state.event_context_source = "user"
-
-        if wedding_intent and (not category or not color):
-            pending["active"] = True
-            pending["category"] = category
-            pending["color"] = color
-            pending["needs_category"] = not bool(category)
-            pending["needs_color"] = not bool(color)
-
-            question = ""
-            if pending["needs_category"] and pending["needs_color"]:
-                question = "For the wedding, what category (dress, t-shirt, shoes, etc.) and what color are you looking for?"
-            elif pending["needs_category"]:
-                question = "What category are you shopping for (dress, t-shirt, shoes, etc.)?"
-            else:
+    
+            # If color is missing (non-wedding flow), ask for it
+            if not wedding_intent and not color:
+                pending["active"] = True
+                pending["category"] = category
+                pending["color"] = ""
+                pending["needs_category"] = False
+                pending["needs_color"] = True
+    
                 question = "What color are you looking for?"
-
-            with st.chat_message("assistant"):
-                st.markdown(question)
-
-            st.session_state.messages.append({"role": "assistant", "content": question})
-            st.session_state.conversation_history.append({
-                "role": "assistant",
-                "content": question,
-                "timestamp": datetime.now().isoformat()
-            })
-            save_conversation(
-                st.session_state.current_user_id,
-                st.session_state.session_id,
-                st.session_state.conversation_history
-            )
-            return
-
-        # If color is missing (non-wedding flow), ask for it
-        if not wedding_intent and not color:
-            pending["active"] = True
-            pending["category"] = category
-            pending["color"] = ""
-            pending["needs_category"] = False
-            pending["needs_color"] = True
-
-            question = "What color are you looking for?"
-            with st.chat_message("assistant"):
-                st.markdown(question)
-
-            st.session_state.messages.append({"role": "assistant", "content": question})
-            st.session_state.conversation_history.append({
-                "role": "assistant",
-                "content": question,
-                "timestamp": datetime.now().isoformat()
-            })
-            save_conversation(
-                st.session_state.current_user_id,
-                st.session_state.session_id,
-                st.session_state.conversation_history
-            )
-            return
-
-        # If no event mentioned and no stored event, ask to use upcoming event
-        if not event_type and not st.session_state.event_context:
-            profile = st.session_state.user_profile or {}
-            events = profile.get("upcoming_events", [])
-            if events:
-                event = events[0]
-                event_summary = f"{event.get('event_type', 'event')}"
-                if event.get("date"):
-                    event_summary += f" on {event.get('date')}"
-
-                question = (
-                    f"I noticed your upcoming {event_summary}. "
-                    f"If you'd like me to use it to rank results, reply 'yes'. "
-                    f"Otherwise, just continue and I won't use it."
-                )
-
-                pending["await_event_confirm"] = True
-                pending["saved_query"] = user_input
-                pending["saved_category"] = category
-                pending["saved_color"] = color
-                pending["saved_gender_override"] = gender_override or ""
-
                 with st.chat_message("assistant"):
                     st.markdown(question)
-
+    
                 st.session_state.messages.append({"role": "assistant", "content": question})
                 st.session_state.conversation_history.append({
                     "role": "assistant",
@@ -1634,138 +1832,261 @@ def main():
                     st.session_state.conversation_history
                 )
                 return
-        # Proceed with search + rerank via agent
-        with st.chat_message("assistant"):
-            steps_container = st.container()
-            steps_container.markdown("**Step 1/3:** Running vector search (top 5)...")
-
-            # Vector search (only category + color)
+    
+            # If no event mentioned and no stored event, ask to use upcoming event
+            if not event_type and not st.session_state.event_context:
+                profile = st.session_state.user_profile or {}
+                events = profile.get("upcoming_events", [])
+                if events:
+                    event = events[0]
+                    event_summary = f"{event.get('event_type', 'event')}"
+                    if event.get("date"):
+                        event_summary += f" on {event.get('date')}"
+    
+                    question = (
+                        f"I noticed your upcoming {event_summary}. "
+                        f"If you'd like me to use it to rank results, reply 'yes'. "
+                        f"Otherwise, just continue and I won't use it."
+                    )
+    
+                    pending["await_event_confirm"] = True
+                    pending["saved_query"] = user_input
+                    pending["saved_category"] = category
+                    pending["saved_color"] = color
+                    pending["saved_gender_override"] = gender_override or ""
+    
+                    with st.chat_message("assistant"):
+                        st.markdown(question)
+    
+                    st.session_state.messages.append({"role": "assistant", "content": question})
+                    st.session_state.conversation_history.append({
+                        "role": "assistant",
+                        "content": question,
+                        "timestamp": datetime.now().isoformat()
+                    })
+                    save_conversation(
+                        st.session_state.current_user_id,
+                        st.session_state.session_id,
+                        st.session_state.conversation_history
+                    )
+                    return
+            # Proceed with search + rerank via agent
+            search_query = build_search_query(category, color, user_input)
             user_profile = st.session_state.user_profile or {}
             event = st.session_state.event_context
-
-            search_query = build_search_query(category, color, user_input)
             gender_filter = get_gender_filter(user_profile, gender_override or None)
 
-            embedding = generate_embedding(search_query)
-            results = vector_search_products(embedding, limit=5, gender_filter=gender_filter) if embedding else []
-            initial = format_products_for_ui(results)
+            run_id = start_debug_run(user_input, search_query, event, gender_filter)
+            update_debug_step(
+            run_id,
+            "GPT-4o Mini Intent",
+            "done",
+            "Intent extracted",
+            model="gpt-4o-mini",
+            inputs={"user_query": user_input},
+            outputs={
+                "category": category,
+                "color": color,
+                "gender_override": gender_override,
+                "event_type": event_type
+            }
+            )
+            render_debug_panel(debug_current_ph, debug_history_ph)
+            update_debug_step(
+            run_id,
+            "MongoDB Atlas Vector Search",
+            "running",
+            "Generating embedding + querying MongoDB",
+            service="MongoDB Atlas Vector Search",
+            inputs={
+                "vector_query": search_query,
+                "gender_filter": gender_filter or [],
+                "limit": 5
+            }
+            )
+            render_debug_panel(debug_current_ph, debug_history_ph)
 
-            steps_container.markdown(f"✅ **Step 1/3 complete:** Found {len(initial)} results.")
+            with st.chat_message("assistant"):
+                steps_container = st.container()
+                steps_container.markdown("**Step 1/3:** Running vector search (top 5)...")
 
-            if initial:
-                with st.expander("Initial 5 results (vector search)", expanded=False):
-                    render_product_cards(initial, show_vector_score=True, max_items=5)
-                if len(initial) < 5:
-                    st.caption(f"Only {len(initial)} results available after filtering.")
+                # Vector search (only category + color)
+                embedding = generate_embedding(search_query)
+                results = vector_search_products(embedding, limit=5, gender_filter=gender_filter) if embedding else []
+                initial = format_products_for_ui(results)
 
-            # Rerank step
-            time.sleep(0.2)
-            steps_container.markdown("**Step 2/3:** Reranking with LLM + images (event-first)...")
-            reranked = rerank_products_multimodal(initial, user_profile, event, user_input)
-            if not reranked:
-                reranked = []
-                for p in initial[:3]:
-                    reranked.append({
-                        **p,
-                        "event_score": 0.5,
-                        "preference_score": 0.5,
-                        "overall_score": 0.5,
-                        "reasoning": ["Rerank unavailable; using vector results."]
-                    })
-
-            steps_container.markdown("✅ **Step 2/3 complete:** Rerank finished.")
-            if reranked:
-                st.markdown("**🎯 Match Analysis**")
-                with st.expander("View detailed reasoning", expanded=False):
-                    for item in reranked:
-                        st.markdown(f"**{item.get('name', 'Item')}**")
-                        for r in item.get("reasoning", [])[:2]:
-                            # Clean markdown
-                            clean_r = r.replace("*", "").replace("_", "").replace("★", "").strip()
-                            st.caption(f"• {clean_r}")
-
-            if reranked:
-                st.markdown("**Top 3 reranked results**")
-                render_reranked_cards(reranked)
-
-            # Summary step
-            time.sleep(0.2)
-            steps_container.markdown("**Step 3/3:** Generating summary response...")
-            last_context = st.session_state.get("last_conversation_context", "")
-            summary_data = run_agent_summary(user_input, initial, reranked, user_profile, event, last_context)
-            paragraphs = []
-
-            if isinstance(summary_data, dict):
-                intro = summary_data.get("intro", "Here are some great options for you.")
-                extras_blurb = summary_data.get("extras_blurb", "")
-                closing = summary_data.get(
-                    "closing",
-                    "Would you like me to add any of these to your cart?"
+                steps_container.markdown(f"✅ **Step 1/3 complete:** Found {len(initial)} results.")
+                initial_brief = [
+                    {"name": p.get("name"), "score": p.get("vector_score")}
+                    for p in initial[:5]
+                ]
+                update_debug_step(
+                    run_id,
+                    "MongoDB Atlas Vector Search",
+                    "done",
+                    f"Found {len(initial)} results",
+                    service="MongoDB Atlas Vector Search",
+                    outputs={"top_results": initial_brief}
                 )
+                render_debug_panel(debug_current_ph, debug_history_ph)
 
-                # Clean any stray markdown from agent response
-                intro = intro.replace("*", "").replace("_", "").replace("★", "").strip()
-                closing = closing.replace("*", "").replace("_", "").replace("★", "").strip()
-                extras_blurb = extras_blurb.replace("*", "").replace("_", "").replace("★", "").strip()
+                if initial:
+                    with st.expander("Initial 5 results (vector search)", expanded=False):
+                        render_product_cards(initial, show_vector_score=True, max_items=5)
+                    if len(initial) < 5:
+                        st.caption(f"Only {len(initial)} results available after filtering.")
 
-                if intro:
-                    paragraphs.append(intro)
+                # Rerank step
+                time.sleep(0.2)
+                steps_container.markdown("**Step 2/3:** Reranking with LLM + images (event-first)...")
+                update_debug_step(
+                    run_id,
+                    "GPT-4o Reranking",
+                    "running",
+                    "LLM rerank using event + images",
+                    model="gpt-4o",
+                    inputs={
+                        "event_context": event or {},
+                        "initial_count": len(initial),
+                        "uses_images": True
+                    }
+                )
+                render_debug_panel(debug_current_ph, debug_history_ph)
+                reranked = rerank_products_multimodal(initial, user_profile, event, user_input)
+                if not reranked:
+                    reranked = []
+                    for p in initial[:3]:
+                        reranked.append({
+                                **p,
+                                "event_score": 0.5,
+                                "preference_score": 0.5,
+                                "overall_score": 0.5,
+                            "reasoning": ["Rerank unavailable; using vector results."]
+                        })
 
-                # Show brief product list
-                paragraphs.append("**My top picks for you:**")
-                for i, item in enumerate(reranked[:3], 1):
-                    name = item.get('name', 'Item')
-                    price = item.get('price', 0)
-                    # Take only the first reason to keep it concise
-                    reason = item.get("reasoning", [""])[0]
-                    if reason:
-                        # Clean markdown from reason too
-                        reason = reason.replace("*", "").replace("_", "").replace("★", "").strip()
-                        paragraphs.append(f"{i}. **{name}** (${price:.2f}) — {reason[:100]}")
-                    else:
-                        paragraphs.append(f"{i}. **{name}** (${price:.2f})")
+                steps_container.markdown("✅ **Step 2/3 complete:** Rerank finished.")
+                reranked_brief = [
+                    {"name": p.get("name"), "reasoning": (p.get("reasoning") or [])[:2]}
+                    for p in reranked[:3]
+                ]
+                update_debug_step(
+                    run_id,
+                    "GPT-4o Reranking",
+                    "done",
+                    "Rerank finished",
+                    model="gpt-4o",
+                    outputs={"top_3": reranked_brief}
+                )
+                render_debug_panel(debug_current_ph, debug_history_ph)
+                if reranked:
+                    st.markdown("**🎯 Match Analysis**")
+                    with st.expander("View detailed reasoning", expanded=False):
+                        for item in reranked:
+                            st.markdown(f"**{item.get('name', 'Item')}**")
+                            for r in item.get("reasoning", [])[:2]:
+                                # Clean markdown
+                                clean_r = r.replace("*", "").replace("_", "").replace("★", "").strip()
+                                st.caption(f"• {clean_r}")
+    
+                    if reranked:
+                        st.markdown("**Top 3 reranked results**")
+                        render_reranked_cards(reranked)
 
-                if initial[3:5]:
-                    extra_names = [p.get("name") for p in initial[3:5] if p.get("name")]
-                    if extra_names:
-                        if extras_blurb:
-                            paragraphs.append(extras_blurb)
-                        paragraphs.append(f"*Also worth considering:* {', '.join(extra_names)}")
+                # Summary step
+                time.sleep(0.2)
+                steps_container.markdown("**Step 3/3:** Generating summary response...")
+                update_debug_step(
+                    run_id,
+                    "GPT-4o Summary",
+                    "running",
+                    "Generating assistant response",
+                    model="gpt-4o",
+                    inputs={"reranked_count": len(reranked)}
+                )
+                render_debug_panel(debug_current_ph, debug_history_ph)
+                last_context = st.session_state.get("last_conversation_context", "")
+                summary_data = run_agent_summary(user_input, initial, reranked, user_profile, event, last_context)
+                paragraphs = []
+                if isinstance(summary_data, dict):
+                    intro = summary_data.get("intro", "Here are some great options for you.")
+                    extras_blurb = summary_data.get("extras_blurb", "")
+                    closing = summary_data.get(
+                        "closing",
+                        "Would you like me to add any of these to your cart?"
+                    )
 
-                if closing:
-                    paragraphs.append(closing)
-            else:
-                # Fallback to simple text
-                clean_text = str(summary_data or "Here are some recommendations for you.")
-                clean_text = clean_text.replace("*", "").replace("_", "").replace("★", "").strip()
-                paragraphs.append(clean_text)
+                    # Clean any stray markdown from agent response
+                    intro = intro.replace("*", "").replace("_", "").replace("★", "").strip()
+                    closing = closing.replace("*", "").replace("_", "").replace("★", "").strip()
+                    extras_blurb = extras_blurb.replace("*", "").replace("_", "").replace("★", "").strip()
 
-            st.write_stream(stream_paragraphs(paragraphs))
-            response = "\n\n".join(paragraphs)
+                    if intro:
+                        paragraphs.append(intro)
 
-            # Save last results for quick actions
+                    # Show brief product list
+                    paragraphs.append("**My top picks for you:**")
+                    for i, item in enumerate(reranked[:3], 1):
+                        name = item.get('name', 'Item')
+                        price = item.get('price', 0)
+                        # Take only the first reason to keep it concise
+                        reason = item.get("reasoning", [""])[0]
+                        if reason:
+                            # Clean markdown from reason too
+                            reason = reason.replace("*", "").replace("_", "").replace("★", "").strip()
+                            paragraphs.append(f"{i}. **{name}** (${price:.2f}) — {reason[:100]}")
+                        else:
+                            paragraphs.append(f"{i}. **{name}** (${price:.2f})")
+
+                    if initial[3:5]:
+                        extra_names = [p.get("name") for p in initial[3:5] if p.get("name")]
+                        if extra_names:
+                            if extras_blurb:
+                                paragraphs.append(extras_blurb)
+                            paragraphs.append(f"*Also worth considering:* {', '.join(extra_names)}")
+
+                    if closing:
+                        paragraphs.append(closing)
+                else:
+                    # Fallback to simple text
+                    clean_text = str(summary_data or "Here are some recommendations for you.")
+                    clean_text = clean_text.replace("*", "").replace("_", "").replace("★", "").strip()
+                    paragraphs.append(clean_text)
+
+                st.write_stream(stream_paragraphs(paragraphs))
+                response = "\n\n".join(paragraphs)
+                update_debug_step(
+                    run_id,
+                    "GPT-4o Summary",
+                    "done",
+                    "Summary generated",
+                    model="gpt-4o",
+                    outputs={"summary_preview": response[:220]}
+                )
+                render_debug_panel(debug_current_ph, debug_history_ph)
+
+                # Save last results for quick actions
             st.session_state.last_initial_results = initial
             st.session_state.last_reranked_results = reranked
             st.session_state.await_add_to_cart = bool(reranked)
-
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": response,
-            "initial_products": initial,
-            "reranked_products": reranked
-        })
-        st.session_state.conversation_history.append({
-            "role": "assistant",
-            "content": response,
-            "timestamp": datetime.now().isoformat()
-        })
-
-        save_conversation(
-            st.session_state.current_user_id,
-            st.session_state.session_id,
-            st.session_state.conversation_history
-        )
-
-
+    
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": response,
+                "initial_products": initial,
+                "reranked_products": reranked
+            })
+            st.session_state.conversation_history.append({
+                "role": "assistant",
+                "content": response,
+                "timestamp": datetime.now().isoformat()
+            })
+    
+            save_conversation(
+                st.session_state.current_user_id,
+                st.session_state.session_id,
+                st.session_state.conversation_history
+            )
+    
+    
 if __name__ == "__main__":
     main()
