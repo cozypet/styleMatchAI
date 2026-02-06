@@ -8,16 +8,16 @@ This repo includes **AGENTS.md**, which is compatible with OpenAI Codex and can 
 
 ## Code Walkthrough Links
 Use these GitHub anchors during your video to jump directly to key sections in `app.py`:
-- Configuration & constants: `app.py#L50`
-- Data access (MongoDB): `app.py#L153`
-- Intent extraction (Agents SDK): `app.py#L218`
-- Vector search: `app.py#L328`
-- Multimodal rerank (Agents SDK): `app.py#L404`
-- Try‑on pipeline: `app.py#L541`
-- Agent setup (intent, rerank, summary): `app.py#L700`
-- UI rendering (cards, try‑on panel): `app.py#L803`
-- Tech Demo tab (JSON + explanations): `app.py#L1078`
-- Main flow orchestration: `app.py#L1241`
+- Configuration & constants: [`app.py#L50`](app.py#L50)
+- Data access (MongoDB): [`app.py#L153`](app.py#L153)
+- Intent extraction (Agents SDK): [`app.py#L218`](app.py#L218)
+- Vector search: [`app.py#L328`](app.py#L328)
+- Multimodal rerank (Agents SDK): [`app.py#L404`](app.py#L404)
+- Try‑on pipeline: [`app.py#L541`](app.py#L541)
+- Agent setup (intent, rerank, summary): [`app.py#L700`](app.py#L700)
+- UI rendering (cards, try‑on panel): [`app.py#L803`](app.py#L803)
+- Tech Demo tab (JSON + explanations): [`app.py#L1078`](app.py#L1078)
+- Main flow orchestration: [`app.py#L1241`](app.py#L1241)
 
 ## Features
 - Intent capture (category + color) with light conversational guidance
