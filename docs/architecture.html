@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RetailNext Architecture Overview</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Poppins:wght@600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        :root {
+            --primary: #10a37f;
+            --primary-soft: #e7f7f2;
+            --secondary: #202123;
+            --accent: #0e8c6d;
+            --bg-light: #f8f9fb;
+            --text-main: #374151;
+            --text-muted: #6b7280;
+            --card-bg: #ffffff;
+            --border-color: #e5e7eb;
+            --shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            background-color: #d1d5db;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: 'Inter', sans-serif;
+        }
+
+        .slide-container {
+            background-color: var(--bg-light);
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+            width: 1280px;
+            height: 720px;
+            padding: 30px 40px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* HEADER */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 15px;
+        }
+
+        .title-group h1 {
+            font-family: 'Poppins', sans-serif;
+            font-size: 28px;
+            margin: 0;
+            color: var(--secondary);
+        }
+
+        .tech-badges {
+            display: flex;
+            gap: 8px;
+        }
+
+        .badge {
+            padding: 5px 12px;
+            border-radius: 6px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .badge.openai { background: #000; color: #fff; }
+        .badge.mongo { background: #00ed64; color: #001e2b; }
+        .badge.streamlit { background: #ff4b4b; color: #fff; }
+
+        /* PIPELINE ROW (LEFT TO RIGHT) */
+        .pipeline-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 30px;
+            background: #fff;
+            padding: 25px 20px;
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            box-shadow: var(--shadow);
+        }
+
+        .persona-node {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 90px;
+        }
+
+        .user-icon {
+            width: 60px;
+            height: 60px;
+            background: var(--primary-soft);
+            border: 2px solid var(--primary);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: var(--primary);
+            margin-bottom: 8px;
+        }
+
+        .node-label { font-size: 11px; font-weight: 700; text-align: center; color: var(--secondary); }
+
+        .cluster {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            width: 165px;
+            padding: 10px;
+            background: var(--bg-light);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            position: relative;
+        }
+
+        .cluster-num {
+            position: absolute;
+            top: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--primary);
+            color: white;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            font-size: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+        }
+
+        .cluster-title { font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--primary); text-align: center; }
+
+        .step-item {
+            background: #fff;
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+        }
+
+        .step-item span { font-size: 11px; font-weight: 600; text-align: center; }
+        .step-tag { font-size: 8px; font-weight: 800; color: var(--accent); opacity: 0.7; }
+
+        .arrow { color: var(--border-color); font-size: 18px; }
+
+        .final-experience {
+            width: 200px;
+            background: var(--primary);
+            color: white;
+            padding: 15px;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            box-shadow: 0 8px 16px rgba(16, 163, 127, 0.2);
+        }
+
+        .final-experience h3 { margin: 0; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+        .final-item { font-size: 10px; display: flex; align-items: center; gap: 6px; font-weight: 500; }
+
+        /* TECH DASHBOARD (BOTTOM) */
+        .tech-dashboard {
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .dashboard-header { font-size: 12px; font-weight: 700; color: var(--text-muted); display: flex; align-items: center; gap: 8px; }
+        
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+        }
+
+        .json-panel {
+            background: #fff;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px;
+            box-shadow: var(--shadow);
+        }
+
+        .json-panel h4 { margin: 0 0 4px; font-size: 11px; color: var(--primary); }
+        .json-panel p { margin: 0; font-size: 10px; color: var(--text-muted); line-height: 1.4; }
+
+        /* DATA LAYER (FOOTER) */
+        .data-layer {
+            background: #fff;
+            border: 2px solid var(--border-color);
+            padding: 15px 25px;
+            border-radius: 12px;
+            display: grid;
+            grid-template-columns: 140px 1fr 1fr 1fr;
+            gap: 30px;
+            align-items: center;
+            margin-top: auto;
+        }
+
+        .data-label {
+            font-size: 12px;
+            font-weight: 800;
+            color: #00684a;
+            border-right: 2px solid var(--border-color);
+            padding-right: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .data-card h5 { margin: 0 0 2px; font-size: 11px; color: var(--secondary); }
+        .data-card p { margin: 0; font-size: 10px; color: var(--text-muted); }
+
+    </style>
+</head>
+<body>
+
+<div class="slide-container">
+    <header>
+        <div class="title-group">
+            <h1>Architecture Executive Summary</h1>
+        </div>
+        <div class="tech-badges">
+            <div class="badge openai">GPT-4o</div>
+            <div class="badge mongo">Atlas Vector Search</div>
+            <div class="badge streamlit">Streamlit UI</div>
+        </div>
+    </header>
+
+    <!-- Main Pipeline Flow -->
+    <div class="pipeline-row">
+        <!-- Persona -->
+        <div class="persona-node">
+            <div class="user-icon"><i class="fa-solid fa-user-check"></i></div>
+            <div class="node-label">Shopper</div>
+        </div>
+
+        <div class="arrow"><i class="fa-solid fa-chevron-right"></i></div>
+
+        <!-- Step 1 -->
+        <div class="cluster">
+            <div class="cluster-num">1</div>
+            <div class="cluster-title">Understand</div>
+            <div class="step-item">
+                <span>💬 Chat Input</span>
+                <div class="step-tag">Streamlit</div>
+            </div>
+            <div class="step-item">
+                <span>🪄 Extraction</span>
+                <div class="step-tag">gpt-4o-mini</div>
+            </div>
+        </div>
+
+        <div class="arrow"><i class="fa-solid fa-chevron-right"></i></div>
+
+        <!-- Step 2 -->
+        <div class="cluster">
+            <div class="cluster-num">2</div>
+            <div class="cluster-title">Retrieve</div>
+            <div class="step-item">
+                <span>🔲 Embedding</span>
+                <div class="step-tag">text-3-large</div>
+            </div>
+            <div class="step-item">
+                <span>🔍 Vector Search</span>
+                <div class="step-tag">MongoDB Atlas</div>
+            </div>
+        </div>
+
+        <div class="arrow"><i class="fa-solid fa-chevron-right"></i></div>
+
+        <!-- Step 3 -->
+        <div class="cluster">
+            <div class="cluster-num">3</div>
+            <div class="cluster-title">Reason</div>
+            <div class="step-item">
+                <span>⚖️ Reranking</span>
+                <div class="step-tag">gpt-4o</div>
+            </div>
+            <div class="step-item">
+                <span>🧾 Summary</span>
+                <div class="step-tag">gpt-4o</div>
+            </div>
+        </div>
+
+        <div class="arrow"><i class="fa-solid fa-chevron-right"></i></div>
+
+        <!-- Step 4 -->
+        <div class="cluster">
+            <div class="cluster-num">4</div>
+            <div class="cluster-title">Act</div>
+            <div class="step-item">
+                <span>🛒 Cart + Buy</span>
+                <div class="step-tag">UI</div>
+            </div>
+            <div class="step-item">
+                <span>👗 Try-On</span>
+                <div class="step-tag">gpt-image-1.5</div>
+            </div>
+        </div>
+
+        <div class="arrow"><i class="fa-solid fa-chevron-right"></i></div>
+
+        <!-- Final Experience Output -->
+        <div class="final-experience">
+            <h3>Final Experience</h3>
+            <div class="final-item"><i class="fa-solid fa-circle-check"></i> Personalized Recos</div>
+            <div class="final-item"><i class="fa-solid fa-circle-check"></i> Stylist Reasoning</div>
+            <div class="final-item"><i class="fa-solid fa-circle-check"></i> Visual Try-On</div>
+            <div class="final-item"><i class="fa-solid fa-circle-check"></i> One-Click Checkout</div>
+        </div>
+    </div>
+
+    <!-- Technical Dashboard (Dev Layer) -->
+    <div class="tech-dashboard">
+        <div class="dashboard-header">
+            <i class="fa-solid fa-microchip"></i> 
+            <span>Technical Dashboard / Observability Layer</span>
+        </div>
+        <div class="dashboard-grid">
+            <div class="json-panel">
+                <h4>Intent Extraction</h4>
+                <p>Maps query to structured entities (category, color, event).</p>
+            </div>
+            <div class="json-panel">
+                <h4>Search Results</h4>
+                <p>Vector similarity scores for top candidate pool.</p>
+            </div>
+            <div class="json-panel">
+                <h4>Rerank Logic</h4>
+                <p>LLM reasoning on why specific items match user constraints.</p>
+            </div>
+            <div class="json-panel">
+                <h4>Try-On Task</h4>
+                <p>Metadata for image generation and fit validation.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Data Layer (MongoDB) -->
+    <div class="data-layer">
+        <div class="data-label">
+            <i class="fa-solid fa-database"></i>
+            <span>DATA LAYER</span>
+        </div>
+        <div class="data-card">
+            <h5>Product Catalog</h5>
+            <p>Multimodal vectors & real-time inventory.</p>
+        </div>
+        <div class="data-card">
+            <h5>User Profiles</h5>
+            <p>Preferences, sizing, and style history.</p>
+        </div>
+        <div class="data-card">
+            <h5>Memory Store</h5>
+            <p>Session context and conversation state.</p>
+        </div>
+    </div>
+</div>
+
+</body>
+</html>

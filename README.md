@@ -41,6 +41,13 @@ A conversational retail demo with OpenAI Agents SDK + MongoDB Atlas vector searc
 streamlit run app.py
 ```
 
+## Architecture Diagram
+![Architecture Overview](docs/architecture.png)
+
+Interactive version (GitHub Pages): `https://cozypet.github.io/styleMatchAI/architecture.html`
+
+To enable GitHub Pages: Settings → Pages → Source: `main` / `/docs`.
+
 ## Data Prep (Optional)
 Scripts live in `dataprep/` and require `MONGODB_URI`.
 
