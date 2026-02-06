@@ -1,5 +1,7 @@
 # RetailNext Intelligent Search (Streamlit Demo)
 
+**Live demo (deployed):** `https://stylematchai.streamlit.app/`
+
 A conversational retail demo with OpenAI Agents SDK + MongoDB Atlas vector search + multimodal reranking + virtual try‑on.
 
 ## Features
@@ -40,9 +42,6 @@ A conversational retail demo with OpenAI Agents SDK + MongoDB Atlas vector searc
 ```bash
 streamlit run app.py
 ```
-
-## Live Demo
-The hosted app is available at: `https://stylematchai.streamlit.app/`
 
 ## Architecture Diagram
 ![Architecture Overview](docs/architecture.png)
