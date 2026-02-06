@@ -4,6 +4,8 @@
 
 A conversational retail demo with OpenAI Agents SDK + MongoDB Atlas vector search + multimodal reranking + virtual try‑on.
 
+This repo includes **AGENTS.md**, which is compatible with OpenAI Codex and can be used to develop and iterate on the application.
+
 ## Features
 - Intent capture (category + color) with light conversational guidance
 - Vector search (top 5) against MongoDB Atlas
