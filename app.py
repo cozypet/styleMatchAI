@@ -233,37 +233,29 @@ def extract_event_type(text: str) -> str:
 
 def infer_intent_llm(user_text: str, last_context: str) -> dict:
     """
-    Use a small OpenAI model to extract intent.
+    Use an Agent (OpenAI Agents SDK) to extract intent.
     Returns: {category, color, event_type, gender_override}
     """
     if openai_client is None:
         return {}
-
-    prompt = (
-        "Extract the product intent from the user's message. "
-        "Return ONLY JSON with keys: category, color, event_type, gender_override. "
-        "category: short product type (e.g., Tshirts, Shirts, Dresses, Jeans, Shoes, Heels). "
-        "color: color name if mentioned, else empty string. "
-        "event_type: occasion if mentioned (wedding, business_trip, party, interview, date, vacation, beach, garden, office, conference), else empty string. "
-        "gender_override: Men/Women only if the user explicitly asks for that gender, else empty string. "
-        "If context helps, use it, but do not guess."
-    )
 
     payload = {
         "last_conversation_context": last_context,
         "user_message": user_text
     }
 
+    agent = st.session_state.get("intent_agent")
+    if not agent:
+        agent = build_intent_agent()
+        st.session_state.intent_agent = agent
+
     try:
-        response = openai_client.responses.create(
-            model=INTENT_MODEL,
-            input=[{"role": "user", "content": f"{prompt}\n\n{json.dumps(payload, indent=2)}"}],
-            temperature=0.0,
-        )
+        result = Runner.run_sync(agent, f"{json.dumps(payload, indent=2)}")
     except Exception:
         return {}
 
-    parsed = _extract_json(_response_text(response))
+    response_text = result.final_output or ""
+    parsed = _extract_json(response_text)
     return parsed if isinstance(parsed, dict) else {}
 
 
@@ -413,22 +405,6 @@ def format_products_for_ui(results: list) -> list:
 # MULTIMODAL RERANK
 # =============================================================================
 
-def _response_text(resp) -> str:
-    if hasattr(resp, "output_text") and resp.output_text:
-        return resp.output_text
-    # Fallback: try to reconstruct from output items
-    try:
-        texts = []
-        for item in resp.output:
-            if item.type == "message":
-                for c in item.content:
-                    if c.type == "output_text":
-                        texts.append(c.text)
-        return "\n".join(texts)
-    except Exception:
-        return ""
-
-
 def _extract_json(text: str):
     if not text:
         return None
@@ -467,6 +443,7 @@ def rerank_products_multimodal(products: list, user_profile: dict, event: dict, 
     if openai_client is None or not products:
         return []
 
+    # 1) Prepare concise preference + event context (event should dominate rerank).
     prefs = user_profile.get("preferences", {}) if user_profile else {}
     style_prefs = ", ".join(prefs.get("style_preferences", [])) or "N/A"
     colors = ", ".join(prefs.get("favorite_colors", [])) or "N/A"
@@ -483,6 +460,7 @@ def rerank_products_multimodal(products: list, user_profile: dict, event: dict, 
             f"Notes: {event.get('notes', '')}"
         )
 
+    # 2) Build a single rerank prompt instructing JSON output with scores + reasons.
     prompt = (
         "You are reranking product results for a fashion shopping assistant. "
         "Use the event details as higher priority than personal preferences. "
@@ -495,38 +473,37 @@ def rerank_products_multimodal(products: list, user_profile: dict, event: dict, 
         f"{event_text}\n"
     )
 
-    # Build content for vision API
-    content = [{"type": "text", "text": prompt}]
+    # 3) Build multimodal content: text metadata + image per product (if available).
+    content = [{"type": "input_text", "text": prompt}]
     for idx, p in enumerate(products, start=1):
         product_text = (
             f"Product {idx}: id={p['id']}; name={p['name']}; color={p['color']}; "
             f"type={p['type']}; price=${p['price']:.2f}; gender={p.get('gender','')};"
         )
-        content.append({"type": "text", "text": product_text})
+        content.append({"type": "input_text", "text": product_text})
 
         if p.get("image_url"):
             content.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": p["image_url"],
-                    "detail": "low"
-                }
+                "type": "input_image",
+                "image_url": p["image_url"]
             })
         else:
-            content.append({"type": "text", "text": "Image: not available."})
+            content.append({"type": "input_text", "text": "Image: not available."})
 
     try:
-        response = openai_client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[{"role": "user", "content": content}],
-            temperature=0.2,
-            max_tokens=1000
-        )
-        response_text = response.choices[0].message.content
+        # 4) Use the Agents SDK (Responses API) to rerank with multimodal input.
+        agent = st.session_state.get("rerank_agent")
+        if not agent:
+            agent = build_rerank_agent()
+            st.session_state.rerank_agent = agent
+
+        result = Runner.run_sync(agent, [{"role": "user", "content": content}])
+        response_text = result.final_output or ""
     except Exception as e:
         print(f"Rerank API error: {e}")
         return []
 
+    # 5) Parse JSON → compute overall score (event has higher weight).
     data = _extract_json(response_text)
     if not isinstance(data, list):
         return []
@@ -721,7 +698,7 @@ def generate_tryon_image(user_image_input: dict, product_image_url: str) -> tupl
         return None, debug
 
 # =============================================================================
-# AGENT SETUP (summary only)
+# AGENT SETUP 
 # =============================================================================
 
 def build_agent():
@@ -741,6 +718,41 @@ def build_agent():
         instructions=instructions,
         model=LLM_MODEL,
         model_settings=ModelSettings()
+    )
+
+
+def build_intent_agent():
+    instructions = (
+        "Extract the product intent from the user's message. "
+        "Return ONLY JSON with keys: category, color, event_type, gender_override. "
+        "category: short product type (e.g., Tshirts, Shirts, Dresses, Jeans, Shoes, Heels). "
+        "color: color name if mentioned, else empty string. "
+        "event_type: occasion if mentioned (wedding, job_interview, business_trip, party, date, vacation, beach, garden, office, conference), else empty string. "
+        "gender_override: Men/Women only if the user explicitly asks for that gender, else empty string. "
+        "If context helps, use it, but do not guess."
+    )
+    return Agent(
+        name="RetailNext Intent",
+        instructions=instructions,
+        model=INTENT_MODEL,
+        model_settings=ModelSettings(temperature=0.0)
+    )
+
+
+def build_rerank_agent():
+    instructions = (
+        "You are reranking product results for a fashion shopping assistant. "
+        "Use the event details as higher priority than personal preferences. "
+        "Score each product with event_score and preference_score between 0 and 1. "
+        "Return JSON array of objects: {id, event_score, preference_score, reasoning}. "
+        "Reasoning must be 1-2 short bullet points. "
+        "If image is missing, lower the event_score and mention it."
+    )
+    return Agent(
+        name="RetailNext Reranker",
+        instructions=instructions,
+        model=LLM_MODEL,
+        model_settings=ModelSettings(temperature=0.2, max_tokens=1000)
     )
 
 
@@ -1271,6 +1283,10 @@ def main():
         st.session_state.agent = build_agent()
     if "agent_messages" not in st.session_state:
         st.session_state.agent_messages = []
+    if "intent_agent" not in st.session_state:
+        st.session_state.intent_agent = build_intent_agent()
+    if "rerank_agent" not in st.session_state:
+        st.session_state.rerank_agent = build_rerank_agent()
     if "last_conversation_context" not in st.session_state:
         st.session_state.last_conversation_context = ""
     if "cart" not in st.session_state:
