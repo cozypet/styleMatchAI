@@ -65,13 +65,9 @@ INTENT_MODEL = "gpt-4o-mini"
 APP_TITLE = "RetailNext Intelligent Search"
 APP_ICON = "🛍️"
 
-WEDDING_KEYWORDS = [
-    "wedding", "ceremony", "reception", "bridal", "bridesmaid", "groom"
-]
-
 EVENT_KEYWORDS = [
     "wedding", "ceremony", "reception", "bridal", "bridesmaid", "groom",
-    "party", "birthday", "anniversary", "interview", "date", "office",
+    "party", "birthday", "anniversary", "interview", "job interview", "job_interview", "date", "office",
     "vacation", "beach", "garden",
     "business trip", "work trip", "business travel", "conference"
 ]
@@ -219,11 +215,6 @@ def save_conversation(user_id, session_id, messages):
 # INTENT HELPERS
 # =============================================================================
 
-def detect_wedding_intent(text: str) -> bool:
-    text_lower = text.lower()
-    return any(k in text_lower for k in WEDDING_KEYWORDS)
-
-
 def extract_event_type(text: str) -> str:
     text_lower = text.lower()
     for key in EVENT_KEYWORDS:
@@ -232,6 +223,8 @@ def extract_event_type(text: str) -> str:
                 return "wedding"
             if key == "groom":
                 return "wedding"
+            if key in ["interview", "job interview", "job_interview"]:
+                return "job_interview"
             if key in ["business trip", "work trip", "business travel", "conference"]:
                 return "business_trip"
             return key
@@ -568,12 +561,6 @@ def rerank_products_multimodal(products: list, user_profile: dict, event: dict, 
     return reranked[:3]
 
 
-def image_bytes_to_data_url(image_bytes: bytes, mime_type: str | None) -> tuple[str, int, str]:
-    mime = mime_type or "image/jpeg"
-    b64 = base64.b64encode(image_bytes).decode("utf-8")
-    return f"data:{mime};base64,{b64}", len(image_bytes), mime
-
-
 def parse_data_url(data_url: str) -> tuple[bytes | None, str | None]:
     try:
         header, b64 = data_url.split(",", 1)
@@ -743,7 +730,7 @@ def build_agent():
         "in a friendly, conversational tone. Mention event fit if an upcoming event exists. "
         "Provide 1-2 extra recommendations if available from the initial results. "
         "Format:\n"
-        "1) Short friendly intro.\n"
+        "1) Short friendly intro Call user by her name.\n"
         "2) Bullet list of top 3 with concise reasons.\n"
         "3) Optional extra recommendations section.\n"
         "4) Friendly closing question: ask if they want to add to cart and offer to check stock.\n"
@@ -814,7 +801,6 @@ def render_product_cards(products: list, show_vector_score: bool = False, max_it
             with st.container():
                 image_url = product.get("image_url")
                 article_type = product.get("type", "Item")
-                color = product.get("color", "")
 
                 icons = {
                     "Dress": "👗",
@@ -839,9 +825,6 @@ def render_product_cards(products: list, show_vector_score: bool = False, max_it
 
                 price = product.get("price", 0)
                 st.markdown(f"💰 **${price:.2f}**")
-
-                if color:
-                    st.caption(f"Color: {color}")
 
                 if show_vector_score:
                     vscore = product.get("vector_score", 0)
@@ -1284,8 +1267,6 @@ def main():
         }
     if "event_context" not in st.session_state:
         st.session_state.event_context = None
-    if "event_context_source" not in st.session_state:
-        st.session_state.event_context_source = ""
     if "agent" not in st.session_state:
         st.session_state.agent = build_agent()
     if "agent_messages" not in st.session_state:
@@ -1341,7 +1322,6 @@ def main():
             st.session_state.agent_messages = []
             st.session_state.session_id = f"session_{uuid4().hex[:8]}"
             st.session_state.event_context = None
-            st.session_state.event_context_source = ""
             st.session_state.pending = {
                 "active": False,
                 "needs_category": False,
@@ -1721,10 +1701,8 @@ def main():
                         events = profile.get("upcoming_events", [])
                         if events:
                             st.session_state.event_context = events[0]
-                            st.session_state.event_context_source = "profile"
                     else:
                         st.session_state.event_context = None
-                        st.session_state.event_context_source = "declined"
     
                     # Resume saved query
                     user_input = pending["saved_query"]
@@ -1740,7 +1718,6 @@ def main():
                 else:
                     # If unclear, proceed without using the upcoming event (no repeat prompt)
                     st.session_state.event_context = None
-                    st.session_state.event_context_source = "declined"
                     pending["await_event_confirm"] = False
                     pending["saved_query"] = ""
                     pending["saved_category"] = ""
@@ -1764,7 +1741,7 @@ def main():
             if not event_type:
                 event_type = extract_event_type(user_input)
     
-            wedding_intent = event_type == "wedding" or detect_wedding_intent(user_input)
+            wedding_intent = event_type == "wedding"
     
             # Store explicit event context from user input
             if event_type:
@@ -1775,7 +1752,6 @@ def main():
                     "venue": "",
                     "notes": "User-stated event"
                 }
-                st.session_state.event_context_source = "user"
     
             if wedding_intent and (not category or not color):
                 pending["active"] = True
