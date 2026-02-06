@@ -6,6 +6,19 @@ A conversational retail demo with OpenAI Agents SDK + MongoDB Atlas vector searc
 
 This repo includes **AGENTS.md**, which is compatible with OpenAI Codex and can be used to develop and iterate on the application.
 
+## Code Walkthrough Links
+Use these GitHub anchors during your video to jump directly to key sections in `app.py`:
+- Configuration & constants: `app.py#L50`
+- Data access (MongoDB): `app.py#L153`
+- Intent extraction (Agents SDK): `app.py#L218`
+- Vector search: `app.py#L328`
+- Multimodal rerank (Agents SDK): `app.py#L404`
+- Try‑on pipeline: `app.py#L541`
+- Agent setup (intent, rerank, summary): `app.py#L700`
+- UI rendering (cards, try‑on panel): `app.py#L803`
+- Tech Demo tab (JSON + explanations): `app.py#L1078`
+- Main flow orchestration: `app.py#L1241`
+
 ## Features
 - Intent capture (category + color) with light conversational guidance
 - Vector search (top 5) against MongoDB Atlas
@@ -50,7 +63,6 @@ streamlit run app.py
 
 Interactive version (GitHub Pages): `https://cozypet.github.io/styleMatchAI/architecture.html`
 
-To enable GitHub Pages: Settings → Pages → Source: `main` / `/docs`.
 
 ## Data Prep (Optional)
 Scripts live in `dataprep/` and require `MONGODB_URI`.
