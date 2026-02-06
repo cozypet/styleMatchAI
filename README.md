@@ -7,7 +7,7 @@ A conversational retail demo with OpenAI Agents SDK + MongoDB Atlas vector searc
 This repo includes **AGENTS.md**, which is compatible with OpenAI Codex and can be used to develop and iterate on the application.
 
 ## Code Walkthrough Links
-Use these GitHub anchors during your video to jump directly to key sections in `app.py`:
+Use these GitHub anchors jump directly to key sections in `app.py`:
 - Configuration & constants: [`app.py#L50`](app.py#L50)
 - Data access (MongoDB): [`app.py#L153`](app.py#L153)
 - Intent extraction (Agents SDK): [`app.py#L218`](app.py#L218)
