@@ -1450,7 +1450,13 @@ def main():
 
         # Initial greeting
         if not st.session_state.messages:
-            greeting = "Hello! What are you looking for today?"
+            profile = st.session_state.user_profile or {}
+            full_name = profile.get("name", "").strip()
+            first_name = full_name.split(" ")[0] if full_name else ""
+            if first_name:
+                greeting = f"Hello {first_name}! What are you looking for today?"
+            else:
+                greeting = "Hello! What are you looking for today?"
             st.session_state.messages.append({"role": "assistant", "content": greeting})
             with st.chat_message("assistant"):
                 st.markdown(greeting)
